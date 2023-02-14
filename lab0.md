@@ -54,6 +54,8 @@ Connection closed by foreign host.
 
 这里使用两个进程分别模拟服务器端(`netcat`指令启动的进程)和客户端(`telnet`指令启动的进程)。这样两个进程就可以进行通话。
 
+
+
 # 3 Let’s get started—fetching and building the starter code
 
 ## 3.3 Reading the Sponge documentation
@@ -105,5 +107,137 @@ void get_URL(const string &host, const string &path) {
 
     cerr << "Function called: get_URL(" << host << ", " << path << ").\n";
     cerr << "Warning: get_URL() has not been implemented yet.\n";
+}
+```
+
+
+
+# 4. An in-memory reliable byte stream
+
+这一部分需要设计一个可在内存中运行的可靠字节流传输结构。这一模型是简化的读者/写者模型，不需要考虑进程或线程的同步的问题，只需要考虑字节序列存储的数据结构以及接口的实现。
+
+根据讲义的描述，我们需要一个数据结构存储未读取的字节序列，一个成员存储字节流的**容量**，同时通过阅读接口文档，可以发现需要至少存储已读/已写字节数量的统计成员变量。另外，还需要一个EOF的标记成员变量，对应`end_input()`接口。注意到字节流需要确保字节按顺序传输，这符合数据FIFO存取原则，因此采用队列作为数据结构。
+
+由于c++的STL已经实现了队列`deque`（功能更强大的双向队列），因此不重复造轮子，直接用即可。最终，在`byte_stream.hh`中添加成员变量如下：
+
+```cpp
+#ifndef SPONGE_LIBSPONGE_BYTE_STREAM_HH
+#define SPONGE_LIBSPONGE_BYTE_STREAM_HH
+
+#include <string>
+#include <deque>
+
+//! \brief An in-order byte stream.
+
+//! Bytes are written on the "input" side and read from the "output"
+//! side.  The byte stream is finite: the writer can end the input,
+//! and then no more bytes can be written.
+class ByteStream {
+  private:
+    // Your code here -- add private members as necessary.
+    std::deque<char> _queue;
+    size_t _capacity_size;
+    size_t _written_size;
+    size_t _read_size;
+    bool _end_input;
+
+    // Hint: This doesn't need to be a sophisticated data structure at
+    // all, but if any of your tests are taking longer than a second,
+    // that's a sign that you probably want to keep exploring
+    // different approaches.
+
+    bool _error{};  //!< Flag indicating that the stream suffered an error.
+
+  public:
+    // ...
+};
+
+#endif  // SPONGE_LIBSPONGE_BYTE_STREAM_HH
+```
+
+之后就是实现，按照要求进行实现即可。这里需要对c++有一定的基础，了解通过迭代器构造序列型对象会更加方便。这里的变量命名风格参考原文。完成小模拟后，进行测试，根据反馈找出问题进行修正，即可完成热身的实验。总体来说lab0作为warm up的lab还是比较简单的
+
+```cpp
+#include "byte_stream.hh"
+#
+
+// Dummy implementation of a flow-controlled in-memory byte stream.
+
+// For Lab 0, please replace with a real implementation that passes the
+// automated checks run by `make check_lab0`.
+
+// You will need to add private members to the class declaration in `byte_stream.hh`
+
+template <typename... Targs>
+void DUMMY_CODE(Targs &&... /* unused */) {}
+
+using namespace std;
+
+ByteStream::ByteStream(const size_t capacity) :
+    _queue(), _capacity_size(capacity), _written_size(0), _read_size(0), _end_input(false), _error(false) {}
+
+size_t ByteStream::write(const string &data) {
+    if (_end_input)
+        return 0;
+    size_t write_size = min(_capacity_size - _queue.size(), data.length());
+    _written_size += write_size;
+    for (size_t i = 0; i < write_size; ++i)
+        _queue.push_back(data[i]);
+    return write_size;
+}
+
+//! \param[in] len bytes will be copied from the output side of the buffer
+string ByteStream::peek_output(const size_t len) const { 
+    size_t peek_size = min(len, _queue.size());
+    return string(_queue.begin(), _queue.begin() + peek_size);
+}
+
+//! \param[in] len bytes will be removed from the output side of the buffer
+void ByteStream::pop_output(const size_t len) { 
+    size_t pop_size = min(len, _queue.size());
+    _read_size += pop_size;
+    for (size_t i = 0; i < pop_size; i++)
+        _queue.pop_front();
+}
+
+//! Read (i.e., copy and then pop) the next "len" bytes of the stream
+//! \param[in] len bytes will be popped and returned
+//! \returns a string
+std::string ByteStream::read(const size_t len) {
+    string read_data = this->peek_output(len);
+    this->pop_output(len);
+    return read_data;
+}
+
+void ByteStream::end_input() {
+    _end_input = true;
+}
+
+bool ByteStream::input_ended() const { 
+    return _end_input; 
+}
+
+size_t ByteStream::buffer_size() const { 
+    return _queue.size(); 
+}
+
+bool ByteStream::buffer_empty() const { 
+    return _queue.empty(); 
+}
+
+bool ByteStream::eof() const { 
+    return _queue.empty() && _end_input; 
+}
+
+size_t ByteStream::bytes_written() const { 
+    return _written_size; 
+}
+
+size_t ByteStream::bytes_read() const { 
+    return _read_size; 
+}
+
+size_t ByteStream::remaining_capacity() const { 
+    return _capacity_size - _queue.size(); 
 }
 ```
