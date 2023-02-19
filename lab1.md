@@ -24,20 +24,113 @@ git merge origin/lab1-startercode
 
 由于`ByteStream`中存储的是连续拆包的数据报，一旦下一个可写的数据报存在，则需要立刻把未重组的数据报拆包到`ByteStream`，除非缓冲已满。因此，需要一个指示下一个数据报偏移的属性`_next_index`，和存储未重组数据报的数据结构。由于上文机制的存在，如果可以将每个数据报的`index`排序存储，则可以快速查找是否存在可重组的数据报。因此，这里维护一个有序队列，存储`pair<index, string>`。
 
-下面分析一下要实现的接口：
+## 3.2 FAQs
+
+这一部分中提示可能存在字节的重叠，而如果使用优先队列组织未重排字符串则会出现很多很难处理的情况，类似于区间的重叠。因此这里开绿改变数据结构，存储原子化的单位——`<index, byte>`对。如果接收到的字节序列有部分还未写入，则考虑未写入的部分是否连续，如果连续则直接写入`ByteStream`中，并判断是否有后续连续的已经存储的未重排字节；如果没有则写入未重排字节。使用`unordered_map`可以解决重复的问题。
+
+最终的代码如下：
 
 ```cpp
-/* 将优先队列`pq`的数据中满足`pq[0].first == _next_index`的移到ByteStream中 */
-void push_substring(const string &data, const uint64_t index, const bool eof);
+// stream_reassembler.hh
+#ifndef SPONGE_LIBSPONGE_STREAM_REASSEMBLER_HH
+#define SPONGE_LIBSPONGE_STREAM_REASSEMBLER_HH
 
-/* 获取ByteStream */
-ByteStream &stream_out();
+#include "byte_stream.hh"
 
-/* 获取pq中数据报总长度 */
-size_t unassembled_bytes() const;
+#include <cstdint>
+#include <string>
+#include <map>
 
-/* pq是否为空 */
-bool empty() const;
+//! \brief A class that assembles a series of excerpts from a byte stream (possibly out of order,
+//! possibly overlapping) into an in-order byte stream.
+class StreamReassembler {
+  private:
+    // Your code here -- add private members as necessary.
+    std::map<uint64_t, char> _unassembled_map; // unressembled datagram
+    uint64_t _expect_next_index; // expected next index of datagram
+    size_t _eof_index;
+
+    ByteStream _output;  //!< The reassembled in-order byte stream
+    size_t _capacity;    //!< The maximum number of bytes
+
+    // ...
+};
+
+#endif  // SPONGE_LIBSPONGE_STREAM_REASSEMBLER_HH
 ```
 
-分析与设计之后就开始进行编码。
+```cpp
+// stream_reassembler.cc
+#include "stream_reassembler.hh"
+
+// Dummy implementation of a stream reassembler.
+
+// For Lab 1, please replace with a real implementation that passes the
+// automated checks run by `make check_lab1`.
+
+// You will need to add private members to the class declaration in `stream_reassembler.hh`
+
+template <typename... Targs>
+void DUMMY_CODE(Targs &&... /* unused */) {}
+
+using namespace std;
+
+StreamReassembler::StreamReassembler(const size_t capacity) : _unassembled_map(), _expect_next_index(0), _eof_index(-1), _output(capacity), _capacity(capacity) {}
+
+//! \details This function accepts a substring (aka a segment) of bytes,
+//! possibly out-of-order, from the logical stream, and assembles any newly
+//! contiguous substrings and writes them into the output stream in order.
+void StreamReassembler::push_substring(const string &data, const uint64_t index, const bool eof) {
+    size_t i;
+    size_t unassebled_rest = this->_capacity - this->_output.buffer_size() - this->_unassembled_map.size();
+    size_t buffer_rest = this->_capacity - this->_output.buffer_size();
+    if (index > this->_expect_next_index) {
+        for (i = 0; i < data.length() && unassebled_rest; ++i) {
+            if (this->_unassembled_map.find(index + i) == this->_unassembled_map.end())
+                unassebled_rest--;
+            this->_unassembled_map.insert({index + i, data[i]});
+        }
+    } else if (index + data.length() > this->_expect_next_index){
+        // 未写入部分的字符串偏移量
+        size_t start = this->_expect_next_index - index;
+        for (i = start; i < data.length() && buffer_rest; ++i) {
+            // 判断当前字节是否在Reassembler中
+            if (this->_unassembled_map.find(index + i) != this->_unassembled_map.end()) {
+                // 已经在reassembler中，直接写入
+                this->_unassembled_map.erase(index + i);
+            } else {
+                buffer_rest--;
+                if (!unassebled_rest)
+                    this->_unassembled_map.erase(this->_unassembled_map.rbegin()->first);
+                else
+                    unassebled_rest--;
+            }
+        }
+        this->_output.write(data.substr(start, i - start));
+        this->_expect_next_index = index + i;
+
+        std::string appenStr("");
+        while (this->_unassembled_map.find(this->_expect_next_index) != this->_unassembled_map.end())
+        {
+            appenStr += this->_unassembled_map[this->_expect_next_index];
+            this->_unassembled_map.erase(this->_expect_next_index);
+            this->_expect_next_index++;
+        }
+        this->_output.write(appenStr);
+    }
+
+    if (eof) {
+        this->_eof_index = index + data.length();
+    }
+    if (this->_expect_next_index == this->_eof_index)
+        this->_output.end_input();
+}
+
+size_t StreamReassembler::unassembled_bytes() const { 
+    return this->_unassembled_map.size();
+}
+
+bool StreamReassembler::empty() const {
+    return this->_unassembled_map.empty();
+}
+```
