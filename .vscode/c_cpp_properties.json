@@ -7,9 +7,9 @@
                 "${workspaceFolder}/sponge/**"
             ],
             "defines": [],
-            "compilerPath": "/usr/bin/gcc",
-            "cStandard": "c11",
-            "cppStandard": "c++11",
+            "compilerPath": "/usr/bin/g++",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
             "intelliSenseMode": "linux-gcc-x64",
             "compileCommands": "${workspaceFolder}/sponge/build/compile_commands.json"
         }
