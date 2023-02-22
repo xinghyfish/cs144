@@ -105,3 +105,38 @@ uint64_t unwrap(WrappingInt32 n, WrappingInt32 isn, uint64_t checkpoint) {
     }
 }
 ```
+
+## 3.2 Implementing the TCP receiver
+
+Lab 2要求实现`TCPReceiver`类，这个类需要：
+1. 从发送方接收数据段；
+2. 使用`StreamReassembler`重组`ByteStream`
+3. 计算`ackno`和窗口大小。
+
+TCPSegment的格式图中蓝色矩形框的数值是本次实验需要关注的内容，红色矩形框则是需要计算的内容。
+
+通过TCP相关知识和讲义，可以知道TCP中的`ackno`表示下一个期望接收的字节序号，而窗口则等于容量和`TCPReceiver`存储在字节流中字节数量的差。
+
+### 3.2.1 `segment_received()`
+
+这个方法是主要调用的方法，每当有新的segment在连接中被接受时都会被调用，用于：
+
+- **如果有必要则设置ISN。**第一个设置`SYN`标记的segment的序列号即ISN。之后将按顺序将环绕式32-bit的ISN转化为64-bit的等价值。
+- **将任何数据或者流结束标记推到`StreamReassembler`中**。如果`FIN`标记被置位，则这个segment的负载最后一个字节就是整个流的最后一个字节。由于字节流中使用64-bit的index，因此需要对segment的32-bit环绕式seqno调用unwrap函数。
+
+### 3.2.2 `ackno()`
+
+返回`optional<WrappingInt32>`，其中包含了接收者尚未知道的第一个字节的seqno。如果`ISN`还没有设置，则返回空的`optional`。
+
+### 3.2.3 `window_size()`
+
+返回第一个未重组的索引（对应ackno）和第一个无法接受的索引间的距离。
+
+## 3.3 Evolution of the `TCPReceiver` over the life of the connection
+
+这里展示了`TCPReceiver`的三种不同状态：
+- LISTEN：未同步，正在监听
+- SYN_RECV：已经同步且未结束
+- FIN_RECV：已经结束同步
+
+在编程时需要注意以上几种情况。
