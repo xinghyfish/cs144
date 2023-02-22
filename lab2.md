@@ -140,3 +140,71 @@ TCPSegment的格式图中蓝色矩形框的数值是本次实验需要关注的�
 - FIN_RECV：已经结束同步
 
 在编程时需要注意以上几种情况。
+
+# 代码（示例）
+
+类结构：
+
+```cpp
+// `tcp_receiver.hh`
+class TCPReceiver {
+private:
+    bool _syn;
+	WrappingInt32 _isn;
+    //! Our data structure for re-assembling bytes.
+    StreamReassembler _reassembler;
+
+    //! The maximum number of bytes we'll store.
+    size_t _capacity;
+//...
+}
+```
+
+接口实现：
+
+```cpp
+#include "tcp_receiver.hh"
+
+// Dummy implementation of a TCP receiver
+
+// For Lab 2, please replace with a real implementation that passes the
+// automated checks run by `make check_lab2`.
+
+template <typename... Targs>
+void DUMMY_CODE(Targs &&... /* unused */) {}
+
+using namespace std;
+
+void TCPReceiver::segment_received(const TCPSegment &seg) {
+    const TCPHeader &header = seg.header();
+    if (!this->_syn) {
+        // `LISTEN`状态，丢弃所有信息
+        if (!header.syn)
+            return;
+        this->_syn = true;
+        this->_isn = header.seqno;
+    }
+
+    // 按照讲义，checkpoint设置为表示最后一个已经重组的字节索引
+    uint64_t checkpoint = this->_reassembler.stream_out().bytes_written();
+    // 32-bit wrap -> 64-bit
+    // 需要丢弃SYN占用的seqno，如果是带有SYN的segment则会补偿
+    uint64_t index = unwrap(header.seqno, this->_isn, checkpoint) - 1 + (header.syn);
+    // 调用之前的方法
+    this->_reassembler.push_substring(seg.payload().copy(), index, header.fin);
+}
+
+optional<WrappingInt32> TCPReceiver::ackno() const { 
+    if (!this->_syn)
+        // `LISTEN`状态，返回空值
+        return std::nullopt;
+    // 需要补偿SYN占用的seqno，如果已经进入FIN_RSCV状态则需要再补偿FIN占用的seqno，注意这一细节
+    uint64_t abs_ackno = this->_reassembler.stream_out().bytes_written() + 1 + this->_reassembler.stream_out().input_ended();
+    // 64-bit -> 32-bit wrap
+    return wrap(abs_ackno, this->_isn);
+}
+
+size_t TCPReceiver::window_size() const {
+    return this->_capacity - this->_reassembler.stream_out().buffer_size();
+}
+```
